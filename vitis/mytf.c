@@ -40,7 +40,7 @@ void tf_block_read(uint32_t block_num){
 	printf("\033[1;31;40mdata in this block:\n\r");
 	for (int i=0; i < 128; i++){
 		int tmpout = Xil_In32(SPI_BASE_ADDR + i * 4);
-		printf("%04x", tmpout);
+		printf("%08x", tmpout);
 	}
 	printf("\n\r\033[0m");
 
