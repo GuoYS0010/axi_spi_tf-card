@@ -49,8 +49,8 @@
 #include "platform.h"
 #include "xil_printf.h"
 #include "xil_io.h"
+#include "mytf.h"
 
-#define SPI_BASE_ADDR 0xa0000000
 
 int main()
 {
@@ -58,31 +58,31 @@ int main()
     disable_caches();
 
     print("Hello World\n\r");
+    tf_reset();
+    tf_init();
     while(1){
-    	u_int8_t cmd;
-    	u_int32_t arg;
-    	print("please input mycmd:");
-    	scanf("%d", &cmd);
-    	print("please input myarg in hex:");
-    	scanf("%x", &arg);
-    	printf("\n\rtest cmd:%d, arg:%x\n\r", cmd, arg);
-    	Xil_Out32(SPI_BASE_ADDR + 0x200, arg);
-    	Xil_Out32(SPI_BASE_ADDR + 0x204, cmd);
-    	Xil_Out32(SPI_BASE_ADDR + 0x208, 1);
-    	print("rst is set\n\r");
-    	if (cmd == 17){
-    		print("reading block...\n\r");
-    		for (int j=0; j < 20; j++){
-        		for (int i=0; i < 10000; i++){}
-        		print(".");
-
-    		}
-    		print("\n\r");
-    		u_int32_t tmpout;
-    		for (int i=0; i < 128; i++){
-    			tmpout = Xil_In32(SPI_BASE_ADDR + i * 4);
-    			printf("04%x", tmpout);
-    		}
+    	print("\033[0;32;32mif you want cmd 17, input 1.other cmd:input 0\n\r");
+    	print("please input:\033[0m");
+    	print("\n\r");
+    	int flag;
+    	scanf("%d", &flag);
+    	print("\n\r");
+    	if ((flag != 0) && (flag != 1)) continue;
+    	if (flag == 0){
+    		int arg, cmd;
+        	print("\033[0;32;32mplease input cmd:\033[0m");
+        	scanf("%d", &cmd);
+        	print("\n\r");
+        	print("\033[0;32;32mplease input arg in hex:\033[0m");
+        	scanf("%x", &arg);
+        	print("\n\r");
+        	tf_cmd(cmd, arg);
+    	} else{
+    		int block_num;
+        	print("\033[0;32;32mplease input blocknum in hex:\033[0m");
+        	scanf("%x", &block_num);
+        	print("\n\r");
+        	tf_block_read(block_num);
     	}
 
     }

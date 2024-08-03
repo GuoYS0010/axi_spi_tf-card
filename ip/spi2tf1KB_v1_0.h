@@ -1,0 +1,6 @@
+	`define STATUS_IDLE 		3'b000
+	`define STATUS_SEND_CMD		3'b001
+	`define STATUS_RECEIVE_R7	3'b010
+	`define STATUS_RECEIVE_512B	3'b011 
+	`define STATUS_RECEIVE_R1 	3'b100 
+	`define STATUS_RECEIVE_R3 	3'b101 

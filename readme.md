@@ -1,4 +1,6 @@
 # axi_spi_tf-card
+## -1. update
+- 2024.8.3 第一次更新：将tf卡的响应r1，r3,r7等放入了寄存器。具体的寄存器地址参考[2.2](#22-vivado上)的内容;修改vitis代码，不再需要一个个敲cmd，开机自动初始化。
 ## 0. 前言
 这个项目是一个axi4的ip，cpu核（zynq）能够通过axi4总线控制这个ip，发出spi总线的控制信号，控制信号通过GPIO/PMOD上的管脚连接到tf卡/microsd卡的卡托，从而能够读取tf卡中的数据。
 
@@ -40,10 +42,14 @@
 vivado上没啥好说的，参考[design_1.pdf](/block_design/design_1.pdf)，连接好各个模块，设置`SCK` `MISO` `MOSI` `CS` 各个模块的引脚就行。注意设置ip的axi总线地址。我设置的是`0xa0000000`.
 
 关于地址分配：axi模块中的地址offset从0x0-0x3FF
-其中，0x0-0x1FC是在CMD17的时候存储一个block的数据用的
-0x200存储的是命令参数，32bit
-0x204存储的是命令编号，6bit
-0x208存储的是开关，这个开关一按下，就发送上述的指令，同时开关自动复位。
+其中：
+- 0x0-0x1FC是在CMD17的时候存储一个block的数据用的
+- 0x200存储的是命令参数，32bit
+- 0x204存储的是命令编号，6bit
+- 0x208存储的是开关，这个开关一按下，就发送上述的指令，同时开关自动复位。
+- 0x20c存储的是tf卡的r1响应
+- 0x210存储的是tf卡的r3,r7等响应
+
 
 
 ### 2.3 vitis上
@@ -64,7 +70,7 @@ OUTS=$(wildcard *.o)
 Error intializing SD boot data : Software platform XML error, sdx:qemuArguments value "**/qemu/pmu_args.txt" path does not exist E:/********/sw/**/qemu/pmu_args.txt, platform path E:/********/, sdx:configuration **, sdx:image standard
 ```
 
-### 2.4 最终vitis程序运行
+### ~~2.4 最终vitis程序运行~~ 旧版本vitis代码，请忽视这一章节，直接看2.5
 vitis程序怎么用直接看代码就行。之前要修改一下`helloworld.c`中的`SPI_BASE_ADDR`,将他改成之前在vivado中设计的ip地址。正确运行的界面如下
 ![1722514387572](/mdpic/5.jpg)  
 每一轮给tf卡命令需要输入两个数字，一个是cmd的命令号（十进制），一个是cmd的参数（十六进制）。我暂时还没有让sd卡的返回信号通过vitis显示。想看每一轮sd卡怎么返回的就通过ila在vivado中抓波形就好。过两天我就改一下代码，让寄存器存储tf卡给的回应，然后通过vitis输出。
@@ -82,6 +88,35 @@ vitis程序怎么用直接看代码就行。之前要修改一下`helloworld.c`�
 6. cmd:17 arg:800 这句话的意思是读取tf卡的第一个block。当然，前提是第五部中，tf卡已经进入了activate模式。这个800具体是多少因人而异。需要下载一个[winhex](http://www.winhex.com/winhex/),这个软件的作用是查看tf卡各个扇区的信息。注意看下图
 ![8.jpg](/mdpic/8.jpg)
 我当前选中的是tf卡第一个扇区。最右边那一栏中，显示逻辑扇区号是0，物理扇区号是2048，也就是0x800.也就是说，tf卡的扇区物理编号是从0x800开始的。我们要读tf卡的第一个扇区，就应该读800号扇区。输入vitis之后，对应vitis的返回值和winhex中的第一个扇区的数据，发现是一样的。
+### 2.5 vitis最终运行
+在`vitis/mytf.c`中有`tf_reset()`和`tf_init()`两段代码，他们分别实现了tf卡的重置和初始化。逻辑如下：
+```c
+void tf_reset(){
+	int a = tf_cmd(0, 0);
+	while (a != 1){
+		delay();
+		tf_cmd(1, 0);
+		a = tf_cmd(0, 0);
+	}
+	print("\033[1;31;40mtf reset is done!!\n\r\033[0m");
+}//一直进行CMD0,参数为0，直到r1=1，表示重置完成，此时tf卡处于idle状态
+
+void tf_init(){
+	tf_cmd(8, 0x1aa);
+	tf_cmd(55, 0);
+	int a = tf_cmd(41, 0x40000000);
+	while (a != 0){
+		delay();
+		tf_cmd(55, 0);
+		a = tf_cmd(41, 0x40000000);
+	}
+	print("\033[1;31;40mtf init is done!!\n\r\033[0m");
+}//一直执行ACMD41，参数为0x40000000， 直到r1=0, 表示初始化完成，此时tf卡处于activate状态。
+```
+初始化完成后，可以选择读取某个块的数据，或者继续测试一些cmd指令。操作如下图：
+![9.jpg](/mdpic/9.jpg)
+
+
 
 ## 3. 一些学习笔记
 这一章记录了我写verilog代码/vitis代码时遇到的一些问题。

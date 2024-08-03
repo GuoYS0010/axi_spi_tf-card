@@ -31,6 +31,8 @@
 		output wire [12:0] dbg_cnt2,
 		output wire [51:0] dbg_request,
 		output wire [31:0] dbg_byte_MISO,
+		output wire [7 :0] dbg_r1,
+		output wire [31:0] dbg_r32,
 
 		// User ports ends
 		// Do not modify the ports beyond this line
@@ -104,7 +106,9 @@
 		.dbg_cnt	(dbg_cnt	),		
 		.dbg_cnt2	(dbg_cnt2	),		
 		.dbg_request	(dbg_request	),	
-		.dbg_byte_MISO	(dbg_byte_MISO	),		
+		.dbg_byte_MISO	(dbg_byte_MISO	),	
+		.dbg_r1	(dbg_r1	),	
+		.dbg_r32	(dbg_r32	),		
 		.S_AXI_ACLK(s00_axi_aclk),
 		.S_AXI_ARESETN(s00_axi_aresetn),
 		.S_AXI_AWID(s00_axi_awid),

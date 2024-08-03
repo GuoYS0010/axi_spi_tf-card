@@ -1,4 +1,4 @@
-
+`include "spi2tf1KB_v1_0.h"
 `timescale 1 ns / 1 ps
 
 	module spi2tf1KB_v1_0_S00_AXI #
@@ -39,6 +39,8 @@
 		
 		output wire [51:0] dbg_request,
 		output wire [31:0] dbg_byte_MISO,
+		output wire [7 :0] dbg_r1,
+		output wire [31:0] dbg_r32,
 
 		// User ports ends
 		// Do not modify the ports beyond this line
@@ -592,11 +594,21 @@
 	            begin
 	              byte_ram[mem_address] <= data_in;
 	            end   
-				else if (status == 3'b1) byte_ram[130] <= 8'b0;
-				else if ((status == 3'b11) && (cnt2 < 13'd4136) && (cnt2 > 13'h27) && (cnt2[4:0] == 5'b01001))
-					byte_ram[8'b10000000 - cnt2[12:5]] <= reg_byte_MISO[(mem_byte_index*8+7) -: 8];
+				//else if (status == `STATUS_SEND_CMD) byte_ram[130] <= 8'b0;
+				else if (spi_fin) byte_ram[130] <= 8'b0;//when byte_ram[130] become 0, means this cmd is finish. 
+				else if ((status == `STATUS_RECEIVE_512B) && (cnt2 < 13'd4136) && (cnt2 > 13'h27) && (cnt2[4:0] == 5'b01001))
+					byte_ram[8'b10000000 - cnt2[12:5]] <= reg_4byte_MISO[(mem_byte_index*8+7) -: 8];
 					//8'b10000001 is top 8 bit of 4136, which is init value of cnt2
 					//5'b01000    is last 5 bit of 4136, which is init value of cnt2
+				else if ((status == `STATUS_RECEIVE_R1) && (cnt2 == 13'd2)) begin
+					byte_ram[131] <= reg_byte_MISO[(mem_byte_index*8+7) -: 8];
+					byte_ram[132] <= 8'b0;
+				end
+				else if (((status == `STATUS_RECEIVE_R3) || (status == `STATUS_RECEIVE_R7)) && (cnt2 == 13'd34))
+					byte_ram[131] <= reg_byte_MISO[(mem_byte_index*8+7) -: 8];
+				else if (((status == `STATUS_RECEIVE_R3) || (status == `STATUS_RECEIVE_R7)) && (cnt2 == 13'd2))
+					byte_ram[132] <= reg_4byte_MISO[(mem_byte_index*8+7) -: 8];
+				
 
 	        end    
 	      
@@ -610,6 +622,8 @@
 			assign tmparg[(mem_byte_index*8+7) -: 8] 		= 	byte_ram[128];
 			assign tmpcmd[(mem_byte_index*8+7) -: 8] 		= 	byte_ram[129];
 			assign tmprst[(mem_byte_index*8+7) -: 8] 		= 	byte_ram[130];
+			assign tmpr1[(mem_byte_index*8+7) -: 8] 		= 	byte_ram[131];
+			assign tmpr32[(mem_byte_index*8+7) -: 8] 		= 	byte_ram[132];
 	               
 	    end
 	  end       
@@ -635,6 +649,8 @@
 	wire [31:0] tmparg;			//addr 512-515	byte_ram[128]				0x200	
 	wire [31:0] tmpcmd;  		//addr 516-519  byte_ram[129]				0x204
 	wire [31:0] tmprst; 		//addr 520-523  byte_ram[130]				0x208
+	wire [31:0]  tmpr1;  		//addr 524-527  byte_ram[131] 				0x20c
+	wire [31:0] tmpr32;			//addr 528-531  byte_ram[132]  				0x210
 
 	reg[7:0] cnt_init;																		
 	always @(posedge S_AXI_ACLK)begin									//									
@@ -651,10 +667,12 @@
 	reg[30:0] tmpMISO;													//   							
 	always @(negedge clk4)begin											//   											
 		if (!S_AXI_ARESETN) tmpMISO <= 31'b0;							//   													
-		else tmpMISO <= {tmpMISO[29:0], MISO};							//   	this block generate reg_byte_MISO, it shows the last 4 byte of MISO												
+		else tmpMISO <= {tmpMISO[29:0], MISO};							//   	this block generate reg_4byte_MISO, it shows the last 4 byte of MISO												
 	end																	//   	its used for judge 0xfe flag in cmd17 or cmd24
-	wire  [31:0]	reg_byte_MISO;										//   	its also used for load 32bit in byte ram							
-	assign reg_byte_MISO = {tmpMISO, MISO};								//   
+	wire  [31:0]	reg_4byte_MISO;										//   	its also used for load 32bit in byte ram							
+	assign reg_4byte_MISO = {tmpMISO, MISO};							//
+	wire  [31:0]	 	reg_byte_MISO;									//   						
+	assign reg_byte_MISO = {{24{1'b0}}, reg_4byte_MISO[7:0]};			//   
 
 //*********************************************************************************
 	
@@ -671,7 +689,13 @@
 		else clk4 <= clk4;												//									
 	end														
 
-
+//*********************************************************************************
+	reg [2:0] pre_status;														//					
+	always @(posedge clk4) begin												//							
+		if (!S_AXI_ARESETN) pre_status <= `STATUS_IDLE;							//		this block generate spi_fin, when a cmd and its return is finish,								
+		else pre_status <= status;												//		spi_fin become 1.
+	end																			//
+	wire spi_fin = (status == `STATUS_IDLE) && (pre_status != `STATUS_IDLE);	//																		
 
 
 
@@ -702,17 +726,18 @@
 	//status 11:receive data		cnt2 = 4136
 	//status 100:receive r1			cnt2 = 16
 	//status 101:receive r3 		cnt2 = 48
+
 	always @(posedge clk4)begin
-		if (!S_AXI_ARESETN) status <= 3'b0;
+		if (!S_AXI_ARESETN) status <= `STATUS_IDLE;
 		else begin
-			if ((status == 3'b0) && (tmprst)) status <= 3'b1;
-			else if ((status == 3'b1) && (cnt == 0)) begin
-				if (tmpcmd == 6'd8) status <= 3'b10;
-				else if (tmpcmd == 6'd58) status <= 3'b101;
-				else status <= 3'b100;
+			if ((status == `STATUS_IDLE) && (tmprst)) status <= `STATUS_SEND_CMD;
+			else if ((status == `STATUS_SEND_CMD) && (cnt == 0)) begin
+				if (tmpcmd == 6'd8) status <= `STATUS_RECEIVE_R7;
+				else if (tmpcmd == 6'd58) status <= `STATUS_RECEIVE_R3;
+				else status <= `STATUS_RECEIVE_R1;
 			end
-			else if ((status == 3'b100) && (cnt2 == 0) &&(((tmpcmd == 6'd17) || (tmpcmd == 6'd24)))) status <= 3'b11;
-			else if (((status == 3'b10) || (status == 3'b11) || (status == 3'b100)|| (status == 3'b101)) && (cnt2 == 0)) status <= 3'b0;
+			else if ((status == `STATUS_RECEIVE_R1) && (cnt2 == 0) &&(((tmpcmd == 6'd17) || (tmpcmd == 6'd24)))) status <= `STATUS_RECEIVE_512B;
+			else if (((status == `STATUS_RECEIVE_R7) || (status == `STATUS_RECEIVE_512B) || (status == `STATUS_RECEIVE_R1)|| (status == `STATUS_RECEIVE_R3)) && (cnt2 == 0)) status <= `STATUS_IDLE;
 			else status <= status;
 		end
 	end
@@ -721,21 +746,21 @@
 	always @(posedge clk4)begin
 		if (!S_AXI_ARESETN) cnt2 <= {13{1'b1}};
 		else begin
-			if ((status == 3'b0) || (status == 3'b1)) cnt2 <= {13{1'b1}};
-			else if (status == 3'b10) begin
+			if ((status == `STATUS_IDLE) || (status == `STATUS_SEND_CMD)) cnt2 <= {13{1'b1}};
+			else if (status == `STATUS_RECEIVE_R7) begin
 				if (cnt2 == {13{1'b1}}) cnt2 <= 13'd48;
 				else  cnt2 <= cnt2 - 1;
 			end
-			else if (status == 3'b11) begin
-				if (cnt2 == {13{1'b1}} && (reg_byte_MISO[7:0] == 8'hfe) ) cnt2 <= 13'd4136;
+			else if (status == `STATUS_RECEIVE_512B) begin
+				if (cnt2 == {13{1'b1}} && (reg_4byte_MISO[7:0] == 8'hfe) ) cnt2 <= 13'd4136;
 				else if (cnt2 == {13{1'b1}}) cnt2 <= cnt2;
 				else  cnt2 <= cnt2 - 1;
 			end
-			else if (status == 3'b100) begin
+			else if (status == `STATUS_RECEIVE_R1) begin
 				if (cnt2 == {13{1'b1}}) cnt2 <= 13'd16;
 				else   cnt2 <= cnt2 - 1;
 			end
-			else if (status == 3'b101) begin
+			else if (status == `STATUS_RECEIVE_R3) begin
 				if (cnt2 == {13{1'b1}}) cnt2 <= 13'd48;
 				else   cnt2 <= cnt2 - 1;
 			end else cnt2 <= cnt2;
@@ -770,7 +795,9 @@
 	assign dbg_cnt = cnt;
 	assign dbg_request = request;
 	assign dbg_cnt2 = cnt2;
-	assign dbg_byte_MISO = reg_byte_MISO;
+	assign dbg_byte_MISO = reg_4byte_MISO;
+	assign dbg_r1 = tmpr1[7:0];
+	assign dbg_r32 = tmpr32;
 	// User logic ends
 
 	endmodule
